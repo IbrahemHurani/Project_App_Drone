@@ -11,16 +11,26 @@ import android.widget.TextView;
 import android.widget.ToggleButton;
 
 import androidx.annotation.NonNull;
-
 import com.dji.sdk.sample.R;
+import com.dji.sdk.sample.demo.accessory.AccessoryAggregationView;
+import com.dji.sdk.sample.demo.accessory.AudioFileListManagerView;
 import com.dji.sdk.sample.internal.OnScreenJoystickListener;
+import com.dji.sdk.sample.internal.audiohandler.MediaRecorderHandler;
+import com.dji.sdk.sample.internal.audiohandler.MediaRecorderOptions;
 import com.dji.sdk.sample.internal.controller.DJISampleApplication;
 import com.dji.sdk.sample.internal.utils.DialogUtils;
+import com.dji.sdk.sample.internal.utils.Helper;
 import com.dji.sdk.sample.internal.utils.ModuleVerificationUtil;
 import com.dji.sdk.sample.internal.utils.OnScreenJoystick;
 import com.dji.sdk.sample.internal.utils.ToastUtils;
+import com.dji.sdk.sample.internal.utils.VideoFeedView;
+import com.dji.sdk.sample.internal.utils.ViewHelper;
 import com.dji.sdk.sample.internal.view.PresentableView;
 
+
+import dji.common.airlink.PhysicalSource;
+import dji.common.camera.CameraVideoStreamSource;
+import dji.common.camera.LaserMeasureInformation;
 import dji.common.error.DJIError;
 import dji.common.flightcontroller.simulator.InitializationData;
 import dji.common.flightcontroller.simulator.SimulatorState;
@@ -28,10 +38,16 @@ import dji.common.model.LocationCoordinate2D;
 import dji.common.util.CommonCallbacks.CompletionCallback;
 import dji.keysdk.FlightControllerKey;
 import dji.keysdk.KeyManager;
+import dji.sdk.base.BaseProduct;
+import dji.sdk.camera.Camera;
+import dji.sdk.camera.VideoFeeder;
 import dji.sdk.flightcontroller.FlightController;
 import dji.sdk.flightcontroller.Simulator;
 import dji.sdk.mobilerc.MobileRemoteController;
 import dji.sdk.products.Aircraft;
+import dji.sdk.sdkmanager.DJISDKManager;
+import org.opencv.core.Mat;
+
 
 /**
  * Class for mobile remote controller.
@@ -43,6 +59,11 @@ public class MobileRemoteControllerView extends RelativeLayout
     private Button btnTakeOff;
     private Button autoLand;
     private Button forceLand;
+    private Button btn_Recoding;
+    private Button btn_stop_Recoding;
+    private VideoFeedView primaryVideoFeed;
+
+
 
     private TextView textView;
 
@@ -50,6 +71,15 @@ public class MobileRemoteControllerView extends RelativeLayout
     private OnScreenJoystick screenJoystickLeft;
     private MobileRemoteController mobileRemoteController;
     private FlightControllerKey isSimulatorActived;
+
+    private TextView curPhysicalSource;
+    private TextView curVideoStreamSource;
+    private TextView laserInfoTv;
+    private VideoFeeder.PhysicalSourceListener sourceListener;
+
+
+    private CameraVideoStreamSource.Callback videoStreamSourceCallback;
+    private LaserMeasureInformation.Callback laserCallback;
 
     public MobileRemoteControllerView(Context context) {
         super(context);
@@ -66,6 +96,7 @@ public class MobileRemoteControllerView extends RelativeLayout
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         setUpListeners();
+        setVideoListener();
     }
 
     @Override
@@ -106,6 +137,59 @@ public class MobileRemoteControllerView extends RelativeLayout
         if (isSimulatorOn != null && isSimulatorOn) {
             btnSimulator.setChecked(true);
             textView.setText("Simulator is On.");
+        }
+        primaryVideoFeed = findViewById(R.id.primary_video_feed);
+
+
+
+    }
+    private void setVideoListener() {
+        if (Helper.isM300Product() && Helper.isH20Series()) {
+            BaseProduct product = DJISDKManager.getInstance().getProduct();
+            if (product.getAirLink() != null && product.getAirLink().getOcuSyncLink() != null) {
+                product.getAirLink().getOcuSyncLink().assignSourceToPrimaryChannel(PhysicalSource.LEFT_CAM, PhysicalSource.FPV_CAM, djiError -> {
+                    String result = "";
+                    if (djiError == null) {
+                        result = "AssignSource Success";
+                    } else {
+                        result = "AssignSource Failed, " + djiError.getDescription();
+                    }
+                    ViewHelper.showToast(this.getContext(), result);
+                });
+            }
+        }
+
+        sourceListener = (videoFeed, physicalSource) -> {
+            if (videoFeed == VideoFeeder.getInstance().getPrimaryVideoFeed()) {
+                String message = "Change Source To " + physicalSource;
+                ViewHelper.showToast(this.getContext(), message);
+
+
+
+
+
+            }
+        };
+
+        primaryVideoFeed.registerLiveVideo(VideoFeeder.getInstance().getPrimaryVideoFeed(), true);
+        ToastUtils.setResultToText(curPhysicalSource, VideoFeeder.getInstance().getPrimaryVideoFeed().getVideoSource().name());
+        VideoFeeder.getInstance().addPhysicalSourceListener(sourceListener);
+
+        videoStreamSourceCallback = (videoStreamSource) -> {
+            String message = "Cur Source: " + videoStreamSource.name();
+            ToastUtils.setResultToText(curVideoStreamSource, message);
+        };
+
+        laserCallback = (laserInformation) -> {
+            String laserInfo = "Laser information: \n" + laserInformation;
+            ToastUtils.setResultToText(laserInfoTv, laserInfo);
+        };
+        Camera curCamera = DJISampleApplication.getProductInstance().getCamera();
+        if (curCamera != null) {
+            curCamera.setCameraVideoStreamSourceCallback(videoStreamSourceCallback);
+            if (curCamera.getLens(0) != null) {
+                curCamera.getLens(0).setLaserMeasureInformationCallback(laserCallback);
+            }
         }
     }
 
@@ -222,6 +306,9 @@ public class MobileRemoteControllerView extends RelativeLayout
                     }
                 });
                 break;
+
+
+
             default:
                 break;
         }
